@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Copy the requirements.txt and application code
 COPY requirements.txt ./
-COPY app.py ./
+COPY Azure_cognatice_search.py ./
 
 # Install FastAPI and Uvicorn
 RUN pip install --no-cache-dir -r requirements.txt
