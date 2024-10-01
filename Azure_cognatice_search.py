@@ -8,7 +8,6 @@ from azure.storage.blob import BlobServiceClient
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import markdown  # Python Markdown library
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
