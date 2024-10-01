@@ -1,12 +1,18 @@
 import base64
 import json
 import os
+import logging
 from openai import AzureOpenAI
 from fastapi import FastAPI, HTTPException
 from azure.storage.blob import BlobServiceClient
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import markdown  # Python Markdown library
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 app.add_middleware(
@@ -16,6 +22,7 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods, or specify ['POST']
     allow_headers=["*"],  # Allows all headers
 )
+
 # Replace with your actual Azure Blob Storage credentials
 STORAGE_ACCOUNT_NAME = 'alfalavastorge'
 STORAGE_ACCOUNT_KEY = 'leVXl7PECLEP5tpDWwH18bXOPZCkvGWdRosfdUy0U0UvKbAIGgV3poNYimVpRBgv13lgCkgY3k+7+AStNrWTOQ=='
@@ -27,6 +34,8 @@ blob_service_client = BlobServiceClient.from_connection_string(
     f"DefaultEndpointsProtocol=https;AccountName={STORAGE_ACCOUNT_NAME};"
     f"AccountKey={STORAGE_ACCOUNT_KEY};EndpointSuffix=core.windows.net"
 )
+
+# Environment variables for Azure OpenAI
 endpoint = os.getenv("ENDPOINT_URL", "https://alfalavahub28182992243.openai.azure.com/")
 deployment = os.getenv("DEPLOYMENT_NAME", "gpt-4o")
 search_endpoint = os.getenv("SEARCH_ENDPOINT", "https://alfalaval1.search.windows.net")
@@ -54,7 +63,10 @@ async def handle_prompt(prompt_request: PromptRequest):
         # Create a thread with Azure OpenAI
         completion = client.chat.completions.create(
             model=deployment,
-            messages=[{"role": "user", "content": user_input}],
+            messages=[ {
+        "role": "system",
+        "content": "You are an assistant and an engineer working in the technician department of Alfa Laval, specializing in innovative solutions for heat transfer, separation, and fluid handling across various industries, including food and beverage, energy, marine, and water treatment. You have extensive knowledge of their products, which include heat exchangers, pumps, separators, and decanters.\n\nAlfa Laval is committed to helping clients overcome plant challenges and optimize processes for sustainability and profitability. You provide preventive maintenance services to avoid unplanned stops, perform calibration to ensure equipment accuracy, and supply genuine spare parts to maximize uptime. Training programs are available to enhance team competence and safety.\n\nAlfa Laval’s field service engineers are equipped to repair and recondition equipment, while the company offers reconditioning services to enhance performance and extend equipment life. Cleaning solutions, including Cleaning-In-Place (CIP) systems, are also available to reduce maintenance costs.\n\nHelp users with their questions based on this expertise."
+    },{"role": "user", "content": user_input}],
             max_tokens=200,
             temperature=0.5,
             top_p=0.9,
@@ -65,7 +77,10 @@ async def handle_prompt(prompt_request: PromptRequest):
                 "data_sources": [{
                     "type": "azure_search",
                     "parameters": {
+                        
                         "filter": None,
+                         "semantic_configuration": "default",
+
                         "fields_mapping": {
                             "content_fields_separator": "\n",
                             "content_fields": ["content"],
@@ -76,15 +91,16 @@ async def handle_prompt(prompt_request: PromptRequest):
                         },
                         "endpoint": search_endpoint,
                         "index_name": search_index,
-                        "semantic_configuration": "",
                         "authentication": {
                             "type": "api_key",
                             "key": search_key
                         },
                         "query_type": "simple",
-                        "in_scope": False,
-                        "strictness": 1,
-                        "top_n_documents": 3
+                        "in_scope": True,
+            "role_information": "You are an assistant and an engineer working in the technician department of Alfa Laval, specializing in innovative solutions for heat transfer, separation, and fluid handling across various industries, including food and beverage, energy, marine, and water treatment. You have extensive knowledge of their products, which include heat exchangers, pumps, separators, and decanters.\n\nAlfa Laval is committed to helping clients overcome plant challenges and optimize processes for sustainability and profitability. You provide preventive maintenance services to avoid unplanned stops, perform calibration to ensure equipment accuracy, and supply genuine spare parts to maximize uptime. Training programs are available to enhance team competence and safety.\n\nAlfa Laval’s field service engineers are equipped to repair and recondition equipment, while the company offers reconditioning services to enhance performance and extend equipment life. Cleaning solutions, including Cleaning-In-Place (CIP) systems, are also available to reduce maintenance costs.\n\nHelp users with their questions based on this expertise.",
+           
+            "strictness": 3,
+            "top_n_documents": 5,
                     }
                 }]
             }
@@ -92,23 +108,28 @@ async def handle_prompt(prompt_request: PromptRequest):
 
         data = json.loads(completion.to_json())
         choice = data["choices"][0]
+        print(data)
         citations = choice["message"]["context"].get("citations", [])
+        
         if citations:
             title = citations[0]["title"]
             file_response = await get_file(title)
 
-            # Prepare the result with the title
+            # Prepare the result with the citations
+            html_response = choice["message"]["content"]
             result = {
                 "id": data["id"],
-                "content": choice["message"]["content"],
-                "file": file_response,  # List of titles from citations
+                "content": data['choices'][0]['message']['content'],
+                "file": file_response,  # Response includes file info
             }
 
             return JSONResponse(content={"response": result})
         else:
+            logger.warning("No citations found.")
             raise HTTPException(status_code=404, detail="No citations found.")
 
     except Exception as e:
+        logger.error(f"Error in handle_prompt: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 async def get_file(blob_name: str):
@@ -145,4 +166,6 @@ async def get_file(blob_name: str):
         }
 
     except Exception as e:
+        logger.error(f"Error in get_file: {str(e)}")
         raise HTTPException(status_code=404, detail=f"File not found: {str(e)}")
+
