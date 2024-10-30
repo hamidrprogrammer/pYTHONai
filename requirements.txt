@@ -3,3 +3,5 @@ uvicorn
 openai
 azure-storage-blob
 pydantic
+flask-cors
+markdown
